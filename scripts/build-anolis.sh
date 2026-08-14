@@ -32,7 +32,21 @@ source "$HOME/.cargo/env"
 # CentOS 7 era repos only ship clang 7 (bindgen >= 0.72 needs libclang >= 9)
 # and official LLVM builds need glibc >= 2.18. The PyPI libclang wheel is
 # manylinux2010 (glibc 2.12) and bundles a modern libclang.so.
-LIBCLANG_WHEEL_URL="https://files.pythonhosted.org/packages/1d/fc/716c1e62e512ef1c160e7984a73a5fc7df45166f2ff3f254e71c58076f7c/libclang-18.1.1-1-py2.py3-none-manylinux2010_x86_64.whl"
+LIBCLANG_VERSION="16.0.6"
+# Resolve the wheel URL from the PyPI JSON API: hardcoded files.pythonhosted
+# URLs proved flaky on the CDN (intermittent 404s).
+LIBCLANG_WHEEL_URL=$(curl -sf "https://pypi.org/pypi/libclang/$LIBCLANG_VERSION/json" | python -c "
+import json, sys
+for u in json.load(sys.stdin)['urls']:
+    fn = u['filename']
+    if 'manylinux' in fn and 'x86_64' in fn:
+        print(u['url']); break
+")
+if [ -z "$LIBCLANG_WHEEL_URL" ]; then
+  echo "ERROR: could not resolve libclang wheel URL from PyPI"
+  exit 1
+fi
+echo "libclang wheel: $LIBCLANG_WHEEL_URL"
 wget -q "$LIBCLANG_WHEEL_URL" -O /tmp/libclang.whl
 mkdir -p /usr/local/libclang
 python -c "import zipfile; zipfile.ZipFile('/tmp/libclang.whl').extractall('/usr/local/libclang')"
