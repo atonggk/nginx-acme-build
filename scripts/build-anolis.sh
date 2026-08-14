@@ -50,8 +50,15 @@ echo "libclang wheel: $LIBCLANG_WHEEL_URL"
 wget -q "$LIBCLANG_WHEEL_URL" -O /tmp/libclang.whl
 mkdir -p /usr/local/libclang
 python -c "import zipfile; zipfile.ZipFile('/tmp/libclang.whl').extractall('/usr/local/libclang')"
-export LIBCLANG_PATH="/usr/local/libclang/clang/native"
-ls -l "$LIBCLANG_PATH"
+# Wheel layouts differ between versions (e.g. 16.x nests everything under
+# libclang-<ver>.data/platlib/), so locate libclang.so after extracting.
+LIBCLANG_SO=$(find /usr/local/libclang -name 'libclang.so' | head -1)
+if [ -z "$LIBCLANG_SO" ]; then
+  echo "ERROR: libclang.so not found in extracted wheel"
+  exit 1
+fi
+export LIBCLANG_PATH="$(dirname "$LIBCLANG_SO")"
+echo "LIBCLANG_PATH=$LIBCLANG_PATH"
 
 # --- Tell the Rust openssl crate about our /usr/local OpenSSL (static) ---
 export OPENSSL_DIR=/usr/local
