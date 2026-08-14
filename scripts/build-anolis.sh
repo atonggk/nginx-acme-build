@@ -60,6 +60,17 @@ fi
 export LIBCLANG_PATH="$(dirname "$LIBCLANG_SO")"
 echo "LIBCLANG_PATH=$LIBCLANG_PATH"
 
+# The wheel ships only libclang.so, without clang's builtin headers
+# (stddef.h, stdarg.h, ...). Point bindgen at the equivalents shipped with
+# the system gcc instead, otherwise parsing fails with
+# "'stddef.h' file not found".
+GCC_INCLUDE_DIR=$(gcc -print-file-name=include)
+if [ ! -f "$GCC_INCLUDE_DIR/stddef.h" ]; then
+  echo "ERROR: gcc builtin headers not found at $GCC_INCLUDE_DIR"
+  exit 1
+fi
+export BINDGEN_EXTRA_CLANG_ARGS="-isystem $GCC_INCLUDE_DIR"
+
 # --- Tell the Rust openssl crate about our /usr/local OpenSSL (static) ---
 export OPENSSL_DIR=/usr/local
 export OPENSSL_STATIC=1
