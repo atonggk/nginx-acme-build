@@ -37,63 +37,38 @@ tar -zxf openssl-$OPENSSL_VERSION.tar.gz
 
 cd nginx-$NGINX_VERSION
 
-BUILD_PATH=$(pwd)
-CC_OPT_VALUE="-g -O2 -ffile-prefix-map=$BUILD_PATH=. -fstack-protector-strong -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC"
+# gcc 4.8 does not support -ffile-prefix-map (gcc 8+) or
+# -fstack-protector-strong (gcc 4.9+), hence the reduced hardening set
+# compared to the Debian build.
+CC_OPT_VALUE="-g -O2 -fstack-protector -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC"
 
-# The stock gcc 4.8 / binutils 2.27 toolchain may reject some hardening
-# linker flags; probe each one so failures are visible in the CI log.
-echo "Toolchain: $(gcc --version | head -1)"
-echo "Linker:    $(gcc -print-prog-name=ld), $(ld --version | head -1)"
-printf 'int main(void) { return 0; }\n' > /tmp/probe.c
-for opt in "-Wl,-z,relro" "-Wl,-z,now" "-Wl,--as-needed" "-fPIC" \
-           "-Wl,-z,relro -Wl,-z,now -Wl,--as-needed -fPIC"; do
-  if gcc -o /tmp/probe /tmp/probe.c $opt 2>/tmp/probe.err; then
-    echo "ld probe OK      : $opt"
-  else
-    echo "ld probe FAILURE : $opt"
-    sed 's/^/    /' /tmp/probe.err
-  fi
-done
-
-LD_OPT_FULL='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed -fPIC'
-LD_OPT_SAFE='-Wl,-z,relro -Wl,-z,now'
-
-run_configure() {
-  # Same portable layout as the Debian build, but with bundled OpenSSL/PCRE2.
-  ./configure \
-    --with-cc-opt="$CC_OPT_VALUE" \
-    --with-ld-opt="$1" \
-    --prefix=.. \
-    --conf-path=nginx.conf \
-    --http-log-path=logs/access.log \
-    --error-log-path=logs/error.log \
-    --lock-path=run/nginx.lock \
-    --pid-path=run/nginx.pid \
-    --modules-path=modules \
-    --http-client-body-temp-path=temp/body \
-    --http-fastcgi-temp-path=temp/fastcgi \
-    --http-proxy-temp-path=temp/proxy \
-    --http-scgi-temp-path=temp/scgi \
-    --http-uwsgi-temp-path=temp/uwsgi \
-    --with-compat \
-    --with-debug \
-    --with-pcre-jit \
-    --with-openssl=../openssl-$OPENSSL_VERSION \
-    --with-pcre=../pcre2-$PCRE2_VERSION \
-    --with-http_ssl_module \
-    --with-http_stub_status_module \
-    --with-http_realip_module \
-    --with-http_auth_request_module \
-    --with-http_v2_module \
-    --add-dynamic-module=../nginx-acme/
-}
-
-if ! run_configure "$LD_OPT_FULL"; then
-  echo "configure failed with full ld-opt, dumping objs/autoconf.err:"
-  cat objs/autoconf.err 2>/dev/null || true
-  echo "Retrying with conservative ld-opt: $LD_OPT_SAFE"
-  run_configure "$LD_OPT_SAFE"
-fi
+# Same portable layout as the Debian build, but with bundled OpenSSL/PCRE2.
+./configure \
+  --with-cc-opt="$CC_OPT_VALUE" \
+  --with-ld-opt='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed -fPIC' \
+  --prefix=.. \
+  --conf-path=nginx.conf \
+  --http-log-path=logs/access.log \
+  --error-log-path=logs/error.log \
+  --lock-path=run/nginx.lock \
+  --pid-path=run/nginx.pid \
+  --modules-path=modules \
+  --http-client-body-temp-path=temp/body \
+  --http-fastcgi-temp-path=temp/fastcgi \
+  --http-proxy-temp-path=temp/proxy \
+  --http-scgi-temp-path=temp/scgi \
+  --http-uwsgi-temp-path=temp/uwsgi \
+  --with-compat \
+  --with-debug \
+  --with-pcre-jit \
+  --with-openssl=../openssl-$OPENSSL_VERSION \
+  --with-pcre=../pcre2-$PCRE2_VERSION \
+  --with-http_ssl_module \
+  --with-http_stub_status_module \
+  --with-http_realip_module \
+  --with-http_auth_request_module \
+  --with-http_v2_module \
+  --add-dynamic-module=../nginx-acme/
 
 make -j"$(nproc)"
 
