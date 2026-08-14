@@ -5,8 +5,13 @@
 # container image, invoked from the GitHub Actions workflow.
 #
 # The system toolchain and libraries are too old for some components, so we
-# bundle and compile OpenSSL 1.1.1 (system 1.0.2k has no TLS 1.3) and PCRE2
-# (system 10.23 is too old) as part of the NGINX build.
+# build and install OpenSSL 1.1.1 (system 1.0.2k has no TLS 1.3) and PCRE2
+# (system 10.23 is too old) into /usr/local first, then link NGINX against
+# them statically. Pre-installing (instead of --with-openssl/--with-pcre)
+# matters: the ACME module's cargo build script compiles NGINX headers and
+# needs openssl/pcre2 headers in the compiler's default include path
+# (/usr/local/include), and it removes the race between the parallel library
+# builds and the Rust build inside `make`.
 #
 set -euo pipefail
 
@@ -35,17 +40,34 @@ tar -zxf nginx-$NGINX_VERSION.tar.gz
 tar -zxf pcre2-$PCRE2_VERSION.tar.gz
 tar -zxf openssl-$OPENSSL_VERSION.tar.gz
 
+# --- Build and install OpenSSL 1.1.1w (static, into /usr/local) ---
+cd openssl-$OPENSSL_VERSION
+./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir=lib no-shared
+make -j"$(nproc)"
+make install_sw
+cd ..
+
+# --- Build and install PCRE2 (static, with JIT, into /usr/local) ---
+cd pcre2-$PCRE2_VERSION
+./configure --prefix=/usr/local --disable-shared --enable-jit
+make -j"$(nproc)"
+make install
+cd ..
+
 cd nginx-$NGINX_VERSION
 
 # gcc 4.8 does not support -ffile-prefix-map (gcc 8+) or
 # -fstack-protector-strong (gcc 4.9+), hence the reduced hardening set
 # compared to the Debian build.
-CC_OPT_VALUE="-g -O2 -fstack-protector -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC"
+CC_OPT_VALUE="-g -O2 -fstack-protector -Wformat -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fPIC -I/usr/local/include"
 
-# Same portable layout as the Debian build, but with bundled OpenSSL/PCRE2.
+# Same portable layout as the Debian build. OpenSSL and PCRE2 are linked
+# statically (absolute archive paths), so the shipped binary is self-contained.
+LD_OPT_VALUE="-Wl,-z,relro -Wl,-z,now -Wl,--as-needed -fPIC /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a /usr/local/lib/libpcre2-8.a"
+
 ./configure \
   --with-cc-opt="$CC_OPT_VALUE" \
-  --with-ld-opt='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed -fPIC' \
+  --with-ld-opt="$LD_OPT_VALUE" \
   --prefix=.. \
   --conf-path=nginx.conf \
   --http-log-path=logs/access.log \
@@ -60,9 +82,6 @@ CC_OPT_VALUE="-g -O2 -fstack-protector -Wformat -Werror=format-security -Wp,-D_F
   --http-uwsgi-temp-path=temp/uwsgi \
   --with-compat \
   --with-debug \
-  --with-pcre-jit \
-  --with-openssl=../openssl-$OPENSSL_VERSION \
-  --with-pcre=../pcre2-$PCRE2_VERSION \
   --with-http_ssl_module \
   --with-http_stub_status_module \
   --with-http_realip_module \
@@ -70,7 +89,15 @@ CC_OPT_VALUE="-g -O2 -fstack-protector -Wformat -Werror=format-security -Wp,-D_F
   --with-http_v2_module \
   --add-dynamic-module=../nginx-acme/
 
-make -j"$(nproc)"
+# Keep the full build log; on failure print the error context so the root
+# cause is visible in the CI log even when buried in parallel make output.
+if ! make -j"$(nproc)" 2>&1 | tee /ws/make.log; then
+  echo ""
+  echo "=================== BUILD FAILED, error context ==================="
+  grep -n -i -B 3 -A 15 'error' /ws/make.log | tail -n 200
+  echo "==================================================================="
+  exit 1
+fi
 
 # --- Package artifacts (same layout as the Debian build) ---
 MODULE_PATH="objs/ngx_http_acme_module.so"
