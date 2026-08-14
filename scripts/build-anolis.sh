@@ -28,6 +28,21 @@ yum install -y gcc gcc-c++ make perl wget git curl ca-certificates \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 source "$HOME/.cargo/env"
 
+# --- libclang for bindgen (the ACME module's nginx-sys crate uses bindgen) ---
+# CentOS 7 era repos only ship clang 7 (bindgen >= 0.72 needs libclang >= 9)
+# and official LLVM builds need glibc >= 2.18. The PyPI libclang wheel is
+# manylinux2010 (glibc 2.12) and bundles a modern libclang.so.
+LIBCLANG_WHEEL_URL="https://files.pythonhosted.org/packages/1d/fc/716c1e62e512ef1c160e7984a73a5fc7df45166f2ff3f254e71c58076f7c/libclang-18.1.1-1-py2.py3-none-manylinux2010_x86_64.whl"
+wget -q "$LIBCLANG_WHEEL_URL" -O /tmp/libclang.whl
+mkdir -p /usr/local/libclang
+python -c "import zipfile; zipfile.ZipFile('/tmp/libclang.whl').extractall('/usr/local/libclang')"
+export LIBCLANG_PATH="/usr/local/libclang/clang/native"
+ls -l "$LIBCLANG_PATH"
+
+# --- Tell the Rust openssl crate about our /usr/local OpenSSL (static) ---
+export OPENSSL_DIR=/usr/local
+export OPENSSL_STATIC=1
+
 cd "$(dirname "$0")/.."
 
 # --- Download sources ---
@@ -40,16 +55,18 @@ tar -zxf nginx-$NGINX_VERSION.tar.gz
 tar -zxf pcre2-$PCRE2_VERSION.tar.gz
 tar -zxf openssl-$OPENSSL_VERSION.tar.gz
 
-# --- Build and install OpenSSL 1.1.1w (static, into /usr/local) ---
+# --- Build and install OpenSSL 1.1.1w (static, PIC, into /usr/local) ---
+# -fPIC is required because the archive is also linked into the ACME module
+# .so (via the Rust openssl crate), not just into the nginx executable.
 cd openssl-$OPENSSL_VERSION
-./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir=lib no-shared
+./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir=lib no-shared -fPIC
 make -j"$(nproc)"
 make install_sw
 cd ..
 
-# --- Build and install PCRE2 (static, with JIT, into /usr/local) ---
+# --- Build and install PCRE2 (static, PIC, with JIT, into /usr/local) ---
 cd pcre2-$PCRE2_VERSION
-./configure --prefix=/usr/local --disable-shared --enable-jit
+./configure --prefix=/usr/local --disable-shared --enable-jit --with-pic
 make -j"$(nproc)"
 make install
 cd ..
