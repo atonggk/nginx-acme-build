@@ -198,8 +198,34 @@ RPM_RELEASE="1.an7"
 RPM_TOPDIR=/tmp/rpmbuild
 RPM_BUILDROOT="$RPM_TOPDIR/buildroot"
 rm -rf "$RPM_TOPDIR"
-mkdir -p "$RPM_BUILDROOT/opt" "$RPM_TOPDIR/SPECS" "$RPM_TOPDIR/RPMS"
+mkdir -p "$RPM_BUILDROOT/opt" "$RPM_BUILDROOT/usr/lib/systemd/system" \
+         "$RPM_TOPDIR/SPECS" "$RPM_TOPDIR/RPMS"
 cp -a "$PACKAGE_BASE_DIR" "$RPM_BUILDROOT/opt/nginx_acme"
+
+# systemd unit. Written for systemd 219 (Anolis 7.9 / RHEL 7): a single
+# ExecReload only (multiple ExecReload lines need systemd >= 231).
+cat > "$RPM_BUILDROOT/usr/lib/systemd/system/nginx-acme.service" <<'EOF'
+[Unit]
+Description=nginx (ACME) self-contained instance
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+WorkingDirectory=/opt/nginx_acme
+PIDFile=/opt/nginx_acme/run/nginx.pid
+ExecStartPre=/opt/nginx_acme/sbin/nginx -p /opt/nginx_acme -c nginx.conf -t
+ExecStart=/opt/nginx_acme/sbin/nginx -p /opt/nginx_acme -c nginx.conf
+ExecReload=/bin/sh -c '/opt/nginx_acme/sbin/nginx -p /opt/nginx_acme -c nginx.conf -t && /opt/nginx_acme/sbin/nginx -p /opt/nginx_acme -c nginx.conf -s reload'
+ExecStop=/opt/nginx_acme/sbin/nginx -p /opt/nginx_acme -c nginx.conf -s quit
+LimitNOFILE=65535
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 cat > "$RPM_TOPDIR/SPECS/nginx-acme.spec" <<EOF
 Name: nginx-acme
@@ -208,19 +234,33 @@ Release: $RPM_RELEASE
 Summary: NGINX with the ACME dynamic module (portable layout)
 License: BSD-2-Clause
 URL: https://nginx.org/
+BuildArch: x86_64
 
 %description
 NGINX $NGINX_VERSION built for Anolis OS 7.9 (RHEL 7 / CentOS 7 compatible)
 with the nginx-acme dynamic module. OpenSSL 1.1.1w and PCRE2 are linked
 statically; the tree is self-contained under /opt/nginx_acme.
 
+Manage with systemd:
+  systemctl enable --now nginx-acme
+or directly:
+  cd /opt/nginx_acme && ./nginxctl.sh {start|stop|quit|reload|test|status}
+
 %post
-echo "Installed under /opt/nginx_acme - manage with:"
-echo "  cd /opt/nginx_acme && ./nginxctl.sh {start|stop|quit|reload|test|status}"
+systemctl daemon-reload >/dev/null 2>&1 || true
+echo "Installed under /opt/nginx_acme."
+echo "Enable and start with: systemctl enable --now nginx-acme"
+exit 0
+
+%preun
+if [ \$1 -eq 0 ]; then
+  systemctl --no-reload disable --now nginx-acme >/dev/null 2>&1 || true
+fi
 exit 0
 
 %files
 /opt/nginx_acme
+/usr/lib/systemd/system/nginx-acme.service
 EOF
 
 rpmbuild -bb \

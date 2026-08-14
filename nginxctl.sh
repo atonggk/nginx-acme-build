@@ -8,9 +8,10 @@
 # ==============================================================================
 
 # --- Configuration ---
-# Set the absolute path to your NGINX installation directory.
-# IMPORTANT: Do not use trailing slashes.
-NGINX_HOME="/data/nginx_acme"
+# The NGINX home defaults to the directory this script lives in, so the same
+# tree works wherever it is unpacked (or installed by the RPM under
+# /opt/nginx_acme). Override by setting NGINX_HOME in the environment.
+NGINX_HOME="${NGINX_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 
 # --- Script Body (Do not edit below this line) ---
