@@ -22,7 +22,7 @@ OS_TAG="anolis79"
 
 # --- Build dependencies (system gcc 4.8 is sufficient for NGINX itself) ---
 yum install -y gcc gcc-c++ make perl wget git curl ca-certificates \
-    zlib-devel tar gzip
+    zlib-devel tar gzip rpm-build
 
 # --- Rust toolchain for the ACME module ---
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
@@ -193,9 +193,54 @@ EOF
 ARTIFACT_NAME="nginx-${NGINX_VERSION}-acme-${OS_TAG}.tar.gz"
 tar -czf "$ARTIFACT_NAME" "$PACKAGE_BASE_DIR"
 
+# --- Also ship an RPM that installs the same tree under /opt/nginx_acme ---
+RPM_RELEASE="1.an7"
+RPM_TOPDIR=/tmp/rpmbuild
+RPM_BUILDROOT="$RPM_TOPDIR/buildroot"
+rm -rf "$RPM_TOPDIR"
+mkdir -p "$RPM_BUILDROOT/opt" "$RPM_TOPDIR/SPECS" "$RPM_TOPDIR/RPMS"
+cp -a "$PACKAGE_BASE_DIR" "$RPM_BUILDROOT/opt/nginx_acme"
+
+cat > "$RPM_TOPDIR/SPECS/nginx-acme.spec" <<EOF
+Name: nginx-acme
+Version: $NGINX_VERSION
+Release: $RPM_RELEASE
+Summary: NGINX with the ACME dynamic module (portable layout)
+License: BSD-2-Clause
+URL: https://nginx.org/
+
+%description
+NGINX $NGINX_VERSION built for Anolis OS 7.9 (RHEL 7 / CentOS 7 compatible)
+with the nginx-acme dynamic module. OpenSSL 1.1.1w and PCRE2 are linked
+statically; the tree is self-contained under /opt/nginx_acme.
+
+%post
+echo "Installed under /opt/nginx_acme - manage with:"
+echo "  cd /opt/nginx_acme && ./nginxctl.sh {start|stop|quit|reload|test|status}"
+exit 0
+
+%files
+/opt/nginx_acme
+EOF
+
+rpmbuild -bb \
+  --define "_topdir $RPM_TOPDIR" \
+  --buildroot "$RPM_BUILDROOT" \
+  "$RPM_TOPDIR/SPECS/nginx-acme.spec"
+
+RPM_PATH=$(find "$RPM_TOPDIR/RPMS" -name '*.rpm' | head -1)
+if [ -z "$RPM_PATH" ]; then
+  echo "ERROR: RPM was not created."
+  exit 1
+fi
+echo "Built RPM: $RPM_PATH"
+
 ARTIFACT_DIR=../artifact
 mkdir -p "$ARTIFACT_DIR"
 mv "$ARTIFACT_NAME" "$ARTIFACT_DIR/"
+cp "$RPM_PATH" "$ARTIFACT_DIR/"
 sha256sum "$ARTIFACT_DIR/$ARTIFACT_NAME" > "$ARTIFACT_DIR/$ARTIFACT_NAME.sha256"
+sha256sum "$ARTIFACT_DIR/$(basename "$RPM_PATH")" > "$ARTIFACT_DIR/$(basename "$RPM_PATH").sha256"
 
-echo "Done: $ARTIFACT_DIR/$ARTIFACT_NAME"
+echo "Done:"
+ls -l "$ARTIFACT_DIR"

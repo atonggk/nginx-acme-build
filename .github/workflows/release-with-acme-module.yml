@@ -275,8 +275,8 @@ jobs:
         id: prep
         run: |
           mkdir -p release-assets
-          # Move all downloaded packages to the release assets directory.
-          find ./dist -name "*.tar.gz" -exec mv {} ./release-assets/ \;
+          # Move all downloaded packages (tarballs and RPMs) to the release assets directory.
+          find ./dist \( -name "*.tar.gz" -o -name "*.rpm" \) -exec mv {} ./release-assets/ \;
 
           echo "### SHA256 Checksums" > release-body.md
           echo '```' >> release-body.md
@@ -296,5 +296,5 @@ jobs:
           tag_name: nginx-${{ needs.check-for-new-version.outputs.version }}
           name: NGINX ${{ needs.check-for-new-version.outputs.version }} with ACME Module Packages
           body: ${{ steps.prep.outputs.body }}
-          # Use a glob pattern to upload all packaged archives.
-          files: ./release-assets/*.tar.gz
+          # Use a glob pattern to upload all packaged archives (tarballs and RPMs).
+          files: ./release-assets/*
