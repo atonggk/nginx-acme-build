@@ -222,11 +222,41 @@ jobs:
           name: nginx-package-debian${{ matrix.os_tag }}
           path: artifact/
 
+  # This job builds the NGINX binary and the ACME module for Anolis OS 7.9
+  # (RHEL 7 / CentOS 7 compatible). The build runs inside the official
+  # openanolis/anolisos:7.9 container via `docker run` on an Ubuntu runner,
+  # because the node20 runtime used by GitHub Actions actions requires
+  # glibc >= 2.28 and cannot run directly in a CentOS 7 based container.
+  build-anolis:
+    name: Build for Anolis OS 7.9
+    needs: check-for-new-version
+    if: needs.check-for-new-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build inside Anolis OS 7.9 container
+        env:
+          NGINX_VERSION: ${{ needs.check-for-new-version.outputs.version }}
+        run: |
+          docker run --rm \
+            -v "$PWD:/ws" -w /ws \
+            openanolis/anolisos:7.9-x86_64 \
+            bash scripts/build-anolis.sh "$NGINX_VERSION"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nginx-package-anolis79
+          path: artifact/
+
   # This job runs only after all matrix build jobs have succeeded. It collects
   # all the generated packages and publishes them to a single GitHub Release.
   create-release:
     name: Create GitHub Release
-    needs: [check-for-new-version, build-debian]
+    needs: [check-for-new-version, build-debian, build-anolis]
     if: needs.check-for-new-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
